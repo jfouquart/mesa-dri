@@ -1,0 +1,106 @@
+# Makefile.common - shared code between MesaLib ports.
+#
+# !!! Here be dragons !!! (they seem to be everywhere these days)
+#
+# Remember to upgrade the following ports everytime you bump MESAVERSION:
+#
+#    - graphics/libosmesa
+#    - graphics/mesa-dri
+#    - graphics/mesa-libs
+#    - lang/clover
+#
+# $FreeBSD: head/graphics/mesa-dri/Makefile.common 556929 2020-12-03 20:55:32Z manu $
+
+MESAVERSION=	${MESABASEVERSION}${MESASUBVERSION:C/^(.)/.\1/}
+MESADISTVERSION=${MESABASEVERSION}${MESASUBVERSION:C/^(.)/-\1/}
+
+MESABASEVERSION=	20.2.3
+# if there is a subversion, don't include the '-' between 7.11-rc2.
+MESASUBVERSION=
+
+MASTER_SITES=	https://mesa.freedesktop.org/archive/ \
+		https://mesa.freedesktop.org/archive/${MESABASEVERSION}/ \
+		ftp://ftp.freedesktop.org/pub/mesa/ \
+		ftp://ftp.freedesktop.org/pub/mesa/${MESABASEVERSION}/
+
+DISTFILES=	mesa-${MESADISTVERSION}${EXTRACT_SUFX}
+
+MAINTAINER=	x11@FreeBSD.org
+
+NOT_FOR_ARCHS=sparc64
+NOT_FOR_ARCHS_REASON=not supported on sparc64
+
+COMPONENT=	${PORTNAME:tl:C/^lib//:C/mesa-//}
+
+BUILD_DEPENDS+=	${LOCALBASE}/libdata/pkgconfig/pthread-stubs.pc:devel/libpthread-stubs \
+		${PYTHON_PKGNAMEPREFIX}mako>0:textproc/py-mako@${PY_FLAVOR}
+LIB_DEPENDS+=	libexpat.so:textproc/expat2
+.if ${COMPONENT} != clover
+.if ${PORT_OPTIONS:MPLATFORM_X11}
+USES+=	xorg
+.endif
+.endif
+.if ${COMPONENT} != osmesa
+LIB_DEPENDS+=	libdrm.so:graphics/libdrm
+.endif
+.if ${COMPONENT} != libs
+LIB_DEPENDS+=	libglapi.so:graphics/mesa-libs
+.endif
+.if ${ARCH} == aarch64 || ${ARCH} == amd64 || ${ARCH} == i386 || ${ARCH} == powerpc64 || ${ARCH} == powerpc64le
+LIB_DEPENDS+=	libunwind.so:devel/libunwind
+.endif
+.if ${OPSYS} == DragonFly
+LIB_DEPENDS+=	libelf.so:devel/libelf
+.endif
+
+USES+=		compiler:c++11-lib bison meson pathfix pkgconfig \
+		python:3.6+,build shebangfix tar:xz
+
+USE_LDCONFIG=	yes
+
+.if ${/usr/bin/ld:L:tA} != /usr/bin/ld.lld
+# --build-id isn't supported by old GNU ld.bfd in base
+# Also ld.bfd have problems that seems related to --as-needed
+USE_BINUTILS=		yes
+LDFLAGS+=		-B${LOCALBASE}/bin
+.endif
+
+# only have one port to check with portscout.
+.if ${PORTNAME} != mesa-dri
+PORTSCOUT=	ignore:1
+.endif
+
+python_OLD_CMD=	/usr/bin/env[[:space:]]python2 /usr/bin/python2 /bin/env[[:space:]]python
+SHEBANG_FILES=	src/gallium/*/*/*.py src/gallium/tools/trace/*.py \
+		src/gallium/drivers/svga/svgadump/svga_dump.py \
+		src/mapi/glapi/gen/*.py src/mapi/mapi_abi.py \
+		src/mesa/main/get_*.py src/util/format_srgb.py \
+		src/amd/*/*.py src/intel/genxml/gen_pack_header.py
+
+MASTERDIR=	${.CURDIR:H:H}/graphics/mesa-dri
+PATCHDIR=	${MASTERDIR}/files
+WRKSRC=		${WRKDIR}/mesa-${MESADISTVERSION}
+DESCR=		${.CURDIR}/pkg-descr
+PLIST=		${.CURDIR}/pkg-plist
+PKGHELP=	${.CURDIR}/pkg-help
+PKGINSTALL=	${.CURDIR}/pkg-install
+PKGDEINSTALL=	${.CURDIR}/pkg-deinstall
+
+.if ${COMPONENT} == clover
+EXTRA_PATCHES+= ${PATCHDIR}/extra-src_gallium_auxiliary_meson.build \
+		${PATCHDIR}/extra-src_gallium_auxiliary_vl_vl__stubs.c
+.endif
+
+.include <bsd.port.pre.mk>
+
+BINARY_ALIAS+=	python3=${PYTHON_VERSION}
+
+LLVM_DEFAULT=	10
+BUILD_DEPENDS+=	llvm${LLVM_DEFAULT}>=10.0.1_1:devel/llvm${LLVM_DEFAULT}
+.if ${COMPONENT} != libs
+RUN_DEPENDS+=	llvm${LLVM_DEFAULT}>=10.0.1_1:devel/llvm${LLVM_DEFAULT}
+.endif
+
+MESON_ARGS+=	--native-file="${WRKSRC}/llvm.ini"
+LDFLAGS+=	-Wl,-rpath=${LOCALBASE}/llvm${LLVM_DEFAULT}/lib
+MESON_ARGS+=	-Dllvm=enabled
